@@ -1,0 +1,50 @@
+name: CI
+
+on:
+  push:
+    branches: [main, production-server]
+  pull_request:
+    branches: [main, production-server]
+
+jobs:
+  test-and-check:
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run pytest suite
+        run: pytest
+
+      - name: Verify Django production deploy checks
+        env:
+          DJANGO_SETTINGS_MODULE: dayleey.settings.prod
+          SECRET_KEY: ci-dummy-secret-key-at-least-fifty-characters-long-1234567890
+          ALLOWED_HOSTS: api.dayleey.example
+          DATABASE_URL: postgres://user:pass@db.example:5432/dayleey
+          WA_DRY_RUN: "False"
+          WA_TRANSPORT: cloud_api
+          WA_APP_SECRET: ci-real-app-secret
+          WA_VERIFY_TOKEN: ci-real-verify-token
+          WA_ACCESS_TOKEN: ci-real-access-token
+          WA_PHONE_NUMBER_ID: "1234567890"
+        run: python manage.py check --deploy
+
+      - name: Set up Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+
+      - name: Check Baileys bridge syntax
+        run: node --check bridge/index.js

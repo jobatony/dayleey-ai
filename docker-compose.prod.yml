@@ -1,0 +1,117 @@
+services:
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/app/scripts/start_web.sh"]
+    env_file:
+      - .env.prod
+    restart: unless-stopped
+    networks:
+      - dayleey_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: ["/app/scripts/start_worker.sh"]
+    env_file:
+      - .env.prod
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dayleey_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  caddy:
+    image: caddy:2-alpine
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      - caddy_data:/data
+      - caddy_config:/config
+    env_file:
+      - .env.prod
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dayleey_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional temporary Baileys WhatsApp sidecar (start with: --profile baileys)
+  bridge:
+    profiles: ["baileys"]
+    build:
+      context: ./bridge
+      dockerfile: Dockerfile
+    env_file:
+      - .env.prod
+    environment:
+      BRIDGE_HOST: "0.0.0.0"
+      DJANGO_INBOUND_URL: "http://web:8000/bridge/inbound/"
+    volumes:
+      - baileys_auth:/app/auth
+    depends_on:
+      web:
+        condition: service_healthy
+    restart: unless-stopped
+    networks:
+      - dayleey_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  # Optional local Postgres on EC2 if not using Amazon RDS (start with: --profile localdb)
+  postgres:
+    profiles: ["localdb"]
+    image: postgres:16-alpine
+    environment:
+      POSTGRES_DB: ${POSTGRES_DB:-dayleey}
+      POSTGRES_USER: ${POSTGRES_USER:-dayleey}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-change-me-db-password}
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-dayleey} -d ${POSTGRES_DB:-dayleey}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+    restart: unless-stopped
+    networks:
+      - dayleey_net
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+networks:
+  dayleey_net:
+    driver: bridge
+
+volumes:
+  caddy_data:
+  caddy_config:
+  baileys_auth:
+  pg_data:

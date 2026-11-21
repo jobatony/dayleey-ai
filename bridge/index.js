@@ -25,6 +25,7 @@ const BRIDGE_SECRET = process.env.BRIDGE_SECRET || 'dev-bridge-secret'
 const DJANGO_INBOUND_URL =
   process.env.DJANGO_INBOUND_URL || 'http://127.0.0.1:8000/bridge/inbound/'
 const BRIDGE_PORT = Number(process.env.BRIDGE_PORT || 3001)
+const BRIDGE_HOST = process.env.BRIDGE_HOST || '127.0.0.1'
 const PAIRING_PHONE = normalizePhoneDigits(process.env.WA_PAIRING_PHONE || '')
 const PAUSE_ALL = ['1', 'true', 'yes', 'on'].includes(
   (process.env.PAUSE_ALL || '').trim().toLowerCase()
@@ -263,9 +264,9 @@ app.post('/send', async (req, res) => {
   return res.json({ queued: true, queueLength: outQueue.length })
 })
 
-app.listen(BRIDGE_PORT, '127.0.0.1', () => {
+app.listen(BRIDGE_PORT, BRIDGE_HOST, () => {
   console.log(
-    `[Dayleey Bridge] Listening on http://127.0.0.1:${BRIDGE_PORT} (allowlist=${[...ALLOWLIST].join(',') || 'UNRESTRICTED'})`
+    `[Dayleey Bridge] Listening on http://${BRIDGE_HOST}:${BRIDGE_PORT} (allowlist=${[...ALLOWLIST].join(',') || 'UNRESTRICTED'})`
   )
 })
 

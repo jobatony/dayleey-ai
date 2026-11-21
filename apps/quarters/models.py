@@ -60,6 +60,9 @@ class Priority(models.Model):
     class Meta:
         ordering = ["date", "quarter", "position"]
         unique_together = ("owner", "date", "quarter", "position")
+        indexes = [
+            models.Index(fields=["owner", "date", "quarter"], name="priority_owner_date_q_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"{self.owner.display_name} {self.date} Q{self.quarter}#{self.position}: {self.title} [{self.status}]"

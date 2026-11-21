@@ -48,6 +48,9 @@ class MessageLog(models.Model):
 
     class Meta:
         ordering = ["-created_at"]
+        indexes = [
+            models.Index(fields=["person", "created_at"], name="msglog_person_created_idx"),
+        ]
 
     def __str__(self) -> str:
         return f"[{self.direction}] {self.phone} ({self.msg_type}/{self.status})"
@@ -72,6 +75,13 @@ class UsageCounter(models.Model):
     class Meta:
         unique_together = ("month", "person")
         ordering = ["-month"]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["month"],
+                condition=models.Q(person__isnull=True),
+                name="uniq_global_usage_per_month",
+            )
+        ]
 
     @property
     def delivered_total(self) -> int:

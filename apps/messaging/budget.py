@@ -5,7 +5,8 @@ from datetime import datetime
 from decimal import Decimal
 
 from django.conf import settings
-from django.db import transaction
+from django.db import IntegrityError, transaction
+from django.db.models import F
 from django.utils import timezone
 
 from apps.accounts.models import Person
@@ -26,9 +27,13 @@ def month_key(now: datetime | None = None) -> str:
 def get_or_create_global_counter(now: datetime | None = None) -> UsageCounter:
     mk = month_key(now)
     counter = UsageCounter.objects.filter(month=mk, person__isnull=True).first()
-    if counter is None:
-        counter = UsageCounter.objects.create(month=mk, person=None)
-    return counter
+    if counter is not None:
+        return counter
+    try:
+        with transaction.atomic():
+            return UsageCounter.objects.create(month=mk, person=None)
+    except IntegrityError:
+        return UsageCounter.objects.get(month=mk, person__isnull=True)
 
 
 def get_or_create_person_counter(person: Person, now: datetime | None = None) -> UsageCounter:
@@ -157,57 +162,80 @@ def check_can_send(
 def record_sent(person: Person | None, now: datetime | None = None) -> None:
     ref = now or timezone.now()
     global_counter = get_or_create_global_counter(ref)
-    global_counter.sent_total += 1
-    global_counter.save(update_fields=["sent_total", "updated_at"])
+    UsageCounter.objects.filter(pk=global_counter.pk).update(
+        sent_total=F("sent_total") + 1, updated_at=ref
+    )
     if person is not None:
         pc = get_or_create_person_counter(person, ref)
-        pc.sent_total += 1
-        pc.save(update_fields=["sent_total", "updated_at"])
+        UsageCounter.objects.filter(pk=pc.pk).update(
+            sent_total=F("sent_total") + 1, updated_at=ref
+        )
 
 
 @transaction.atomic
 def record_delivery(log: MessageLog, now: datetime | None = None) -> None:
     """Count a delivered outbound message once (idempotent against duplicate webhooks)."""
-    if log.delivery_counted or log.direction != MessageLog.Direction.OUTBOUND:
+    locked_log = (
+        MessageLog.objects.select_for_update()
+        .select_related("person")
+        .filter(pk=log.pk)
+        .first()
+    )
+    if (
+        locked_log is None
+        or locked_log.delivery_counted
+        or locked_log.direction != MessageLog.Direction.OUTBOUND
+    ):
         return
 
     ref = now or timezone.now()
-    is_template = log.msg_type == MessageLog.MsgType.TEMPLATE
+    is_template = locked_log.msg_type == MessageLog.MsgType.TEMPLATE
     global_counter = get_or_create_global_counter(ref)
+    locked_global = UsageCounter.objects.select_for_update().get(pk=global_counter.pk)
 
+    country_hint = locked_log.person.country_code_hint() if locked_log.person else "default"
     if is_template:
-        unit = lookup_unit_rate(
-            log.person.country_code_hint() if log.person else "default", is_template=True
-        )
+        unit = lookup_unit_rate(country_hint, is_template=True)
         billable = True
         cost = unit
-        global_counter.delivered_template += 1
+        UsageCounter.objects.filter(pk=locked_global.pk).update(
+            delivered_template=F("delivered_template") + 1,
+            est_cost=F("est_cost") + cost,
+            updated_at=ref,
+        )
     else:
-        if global_counter.delivered_service < settings.FREE_SERVICE_MESSAGES_PER_MONTH:
+        if locked_global.delivered_service < settings.FREE_SERVICE_MESSAGES_PER_MONTH:
             billable = False
             cost = Decimal("0")
         else:
             billable = True
-            cost = lookup_unit_rate(
-                log.person.country_code_hint() if log.person else "default", is_template=False
-            )
-        global_counter.delivered_service += 1
+            cost = lookup_unit_rate(country_hint, is_template=False)
+        UsageCounter.objects.filter(pk=locked_global.pk).update(
+            delivered_service=F("delivered_service") + 1,
+            est_cost=F("est_cost") + cost,
+            updated_at=ref,
+        )
 
-    global_counter.est_cost += cost
-    global_counter.save(
-        update_fields=["delivered_service", "delivered_template", "est_cost", "updated_at"]
-    )
-
-    if log.person is not None:
-        pc = get_or_create_person_counter(log.person, ref)
+    if locked_log.person is not None:
+        pc = get_or_create_person_counter(locked_log.person, ref)
         if is_template:
-            pc.delivered_template += 1
+            UsageCounter.objects.filter(pk=pc.pk).update(
+                delivered_template=F("delivered_template") + 1,
+                est_cost=F("est_cost") + cost,
+                updated_at=ref,
+            )
         else:
-            pc.delivered_service += 1
-        pc.est_cost += cost
-        pc.save(update_fields=["delivered_service", "delivered_template", "est_cost", "updated_at"])
+            UsageCounter.objects.filter(pk=pc.pk).update(
+                delivered_service=F("delivered_service") + 1,
+                est_cost=F("est_cost") + cost,
+                updated_at=ref,
+            )
+
+    locked_log.billable = billable
+    locked_log.est_cost = cost
+    locked_log.delivery_counted = True
+    locked_log.save(update_fields=["billable", "est_cost", "delivery_counted", "updated_at"])
 
     log.billable = billable
     log.est_cost = cost
     log.delivery_counted = True
-    log.save(update_fields=["billable", "est_cost", "delivery_counted", "updated_at"])

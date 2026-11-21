@@ -83,7 +83,11 @@ WSGI_APPLICATION = "dayleey.wsgi.application"
 
 DATABASE_URL = os.getenv("DATABASE_URL", "").strip()
 if DATABASE_URL:
-    DATABASES = {"default": dj_database_url.parse(DATABASE_URL, conn_max_age=600)}
+    DATABASES = {
+        "default": dj_database_url.parse(
+            DATABASE_URL, conn_max_age=600, conn_health_checks=True
+        )
+    }
 else:
     DATABASES = {
         "default": {
@@ -147,6 +151,8 @@ BAILEYS_ALLOWLIST = {
 }
 
 # Bot Identity & UX Defaults
+_raw_admin_url = os.getenv("ADMIN_URL", "admin/").strip().lstrip("/") or "admin/"
+ADMIN_URL = _raw_admin_url if _raw_admin_url.endswith("/") else f"{_raw_admin_url}/"
 BOT_DISPLAY_NAME = os.getenv("BOT_DISPLAY_NAME", "Dayleey")
 DEFAULT_TIMEZONE = os.getenv("DEFAULT_TIMEZONE", "Africa/Lagos")
 PARTNER_FALLBACK_DAYS = int(os.getenv("PARTNER_FALLBACK_DAYS", "3"))
@@ -179,6 +185,8 @@ if SENTRY_DSN:
 
     sentry_sdk.init(dsn=SENTRY_DSN, integrations=[DjangoIntegration()], traces_sample_rate=0.1)
 
+LOG_LEVEL = os.getenv("LOG_LEVEL", "INFO").strip().upper() or "INFO"
+
 LOGGING = {
     "version": 1,
     "disable_existing_loggers": False,
@@ -188,5 +196,5 @@ LOGGING = {
     "handlers": {
         "console": {"class": "logging.StreamHandler", "formatter": "standard"},
     },
-    "root": {"handlers": ["console"], "level": "INFO"},
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
 }

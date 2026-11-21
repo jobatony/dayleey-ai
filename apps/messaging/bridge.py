@@ -61,6 +61,9 @@ class BridgeInboundView(APIView):
     authentication_classes = []
 
     def post(self, request):
+        if getattr(settings, "WA_TRANSPORT", "") != "baileys":
+            return Response({"detail": "Not found"}, status=status.HTTP_404_NOT_FOUND)
+
         if not _verify_bridge_secret(request.headers.get("X-Bridge-Secret")):
             logger.warning("Rejected /bridge/inbound/ with invalid secret.")
             return Response({"detail": "Unauthorized"}, status=status.HTTP_401_UNAUTHORIZED)
