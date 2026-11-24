@@ -7,6 +7,8 @@ from .validation import validate_production_settings
 
 DEBUG = False
 ALLOW_SQLITE_IN_PROD = _env_bool("ALLOW_SQLITE_IN_PROD", False)
+WA_DRY_RUN = _env_bool("WA_DRY_RUN", False)
+WA_TRANSPORT = os.getenv("WA_TRANSPORT", "dry_run" if WA_DRY_RUN else "cloud_api").strip().lower()
 
 validate_production_settings(
     {
@@ -24,9 +26,12 @@ validate_production_settings(
     }
 )
 
+# Allow Docker internal healthcheck and bridge -> web service traffic after validating external hosts
+ALLOWED_HOSTS = list(dict.fromkeys([*ALLOWED_HOSTS, "127.0.0.1", "localhost", "web"]))
+
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
 SECURE_SSL_REDIRECT = _env_bool("SECURE_SSL_REDIRECT", True)
-SECURE_REDIRECT_EXEMPT = [r"^healthz/$", r"^readyz/$"]
+SECURE_REDIRECT_EXEMPT = [r"^healthz/$", r"^readyz/$", r"^bridge/inbound/$"]
 SECURE_HSTS_SECONDS = 31536000
 SECURE_HSTS_INCLUDE_SUBDOMAINS = True
 SECURE_HSTS_PRELOAD = True
@@ -43,7 +48,7 @@ else:
     CSRF_TRUSTED_ORIGINS = [
         f"https://{h.lstrip('.')}"
         for h in ALLOWED_HOSTS
-        if h not in {"localhost", "127.0.0.1"} and "." in h
+        if h not in {"localhost", "127.0.0.1", "web"} and "." in h
     ]
 
 STORAGES = {
