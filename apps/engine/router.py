@@ -109,6 +109,10 @@ def handle_inbound(
         logger.info("Ignoring duplicate inbound message %s", msg.wa_message_id)
         return False
 
+    phone_digits = normalize_phone_digits(msg.phone)
+    allowlist_phones: set[str] = getattr(settings, "BETA_ALLOWLIST_PHONES", set())
+    is_env_allowlisted = phone_digits in allowlist_phones
+
     person = None
     created = False
     if msg.wa_jid:
@@ -120,9 +124,12 @@ def handle_inbound(
                 "name": "",
                 "wa_jid": msg.wa_jid,
                 "timezone": settings.DEFAULT_TIMEZONE,
-                "is_allowlisted": not settings.BETA_ALLOWLIST_ENABLED,
+                "is_allowlisted": (not settings.BETA_ALLOWLIST_ENABLED) or is_env_allowlisted,
             },
         )
+    if not person.is_allowlisted and is_env_allowlisted:
+        person.is_allowlisted = True
+        person.save(update_fields=["is_allowlisted", "updated_at"])
     if msg.wa_jid and person.wa_jid != msg.wa_jid:
         person.wa_jid = msg.wa_jid
         person.save(update_fields=["wa_jid", "updated_at"])
@@ -142,15 +149,6 @@ def handle_inbound(
         return False
 
     person.touch_inbound(ref)
-
-    # Resolve numbered menu replies (e.g. "1", "2", "3") from Baileys text menus
-    if not msg.button_id and msg.text.strip().isdigit():
-        last_menu = (person.state_data or {}).get("_last_menu") or []
-        idx = int(msg.text.strip()) - 1
-        if 0 <= idx < len(last_menu):
-            selected = last_menu[idx]
-            msg.button_id = str(selected.get("id") or "")
-            msg.text = str(selected.get("label") or msg.text)
 
     choice = msg.choice
     upper_cmd = msg.text.strip().upper()
