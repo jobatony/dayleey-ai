@@ -65,11 +65,15 @@ def format_user_wrapup(user: Person, target_date: date) -> tuple[str, list[Prior
 
 
 def format_partner_daily_report(user: Person, target_date: date, summary: dict) -> str:
+    footer = (
+        "\nTap a quick response below to encourage or nudge them — "
+        "and keep tomorrow's report unlocked! (Reply STOP to opt out.)"
+    )
     if summary["total"] == 0:
         return (
             f"*Dayleey Daily Report — {user.display_name} ({target_date.strftime('%a %d %b')})*\n"
-            f"{user.display_name} did not set any priorities today.\n\n"
-            "Send them a quick tap below!"
+            f"{user.display_name} did not set any priorities today.\n"
+            + footer
         )
 
     icons = {
@@ -89,7 +93,7 @@ def format_partner_daily_report(user: Person, target_date: date, summary: dict) 
     ]
     for item in summary.get("items", []):
         lines.append(f"{icons.get(item['status'], '•')} Q{item['quarter']}: {item['title']}")
-    lines.append("\nTap a quick response to encourage or nudge them (or reply STOP to opt out).")
+    lines.append(footer)
     return "\n".join(lines)
 
 

@@ -106,19 +106,14 @@ def check_can_send(
     if not allow_quiet_hours and is_in_quiet_hours(person, ref):
         raise BlockedSendError("quiet_hours", f"{person.phone} is in quiet hours.")
 
-    active_transport = transport or getattr(settings, "WA_TRANSPORT", "dry_run")
-    is_baileys = active_transport == "baileys"
-    if is_baileys:
-        billable, est_cost = False, Decimal("0")
-    else:
-        billable, est_cost = estimate_message_cost(person, is_template=is_template, now=ref)
+    billable, est_cost = estimate_message_cost(person, is_template=is_template, now=ref)
 
-        global_counter = get_or_create_global_counter(ref)
-        if global_counter.est_cost + est_cost > settings.MONTHLY_BUDGET_USD:
-            raise BlockedSendError(
-                "global_budget_exceeded",
-                f"Monthly budget ${settings.MONTHLY_BUDGET_USD} reached (${global_counter.est_cost:.4f}).",
-            )
+    global_counter = get_or_create_global_counter(ref)
+    if global_counter.est_cost + est_cost > settings.MONTHLY_BUDGET_USD:
+        raise BlockedSendError(
+            "global_budget_exceeded",
+            f"Monthly budget ${settings.MONTHLY_BUDGET_USD} reached (${global_counter.est_cost:.4f}).",
+        )
 
     person_counter = get_or_create_person_counter(person, ref)
     # Use max(sent_total, delivered_total) so burst sends cannot overrun the cap before delivery webhooks arrive

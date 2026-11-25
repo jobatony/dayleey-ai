@@ -133,6 +133,7 @@ Q_CLUSTER = {
 # WhatsApp Transport & Cloud API settings
 WA_DRY_RUN = _env_bool("WA_DRY_RUN", True)
 WA_TRANSPORT = os.getenv("WA_TRANSPORT", "dry_run" if WA_DRY_RUN else "cloud_api").strip().lower()
+WA_TEMPLATES_APPROVED = _env_bool("WA_TEMPLATES_APPROVED", False)
 PAUSE_ALL = _env_bool("PAUSE_ALL", False)
 WA_API_VERSION = os.getenv("WA_API_VERSION", "v21.0")
 WA_PHONE_NUMBER_ID = os.getenv("WA_PHONE_NUMBER_ID", "")
@@ -140,15 +141,6 @@ WA_BOT_PHONE_NUMBER = _normalize_phone_digits(os.getenv("WA_BOT_PHONE_NUMBER", "
 WA_ACCESS_TOKEN = os.getenv("WA_ACCESS_TOKEN", "")
 WA_VERIFY_TOKEN = os.getenv("WA_VERIFY_TOKEN", "dayleey-verify-token")
 WA_APP_SECRET = os.getenv("WA_APP_SECRET", "dev-app-secret")
-
-# Baileys Prototype Sidecar settings
-BRIDGE_SECRET = os.getenv("BRIDGE_SECRET", "dev-bridge-secret")
-BRIDGE_URL = os.getenv("BRIDGE_URL", "http://127.0.0.1:3001").rstrip("/")
-BAILEYS_ALLOWLIST = {
-    item.strip() if "@" in item else _normalize_phone_digits(item)
-    for item in os.getenv("BAILEYS_ALLOWLIST", "").split(",")
-    if item.strip()
-}
 
 # Bot Identity & UX Defaults
 _raw_admin_url = os.getenv("ADMIN_URL", "admin/").strip().lstrip("/") or "admin/"
@@ -160,6 +152,11 @@ QUIET_HOURS_START = int(os.getenv("QUIET_HOURS_START", "22"))
 QUIET_HOURS_END = int(os.getenv("QUIET_HOURS_END", "6"))
 WEEKLY_REPORT_ENABLED = _env_bool("WEEKLY_REPORT_ENABLED", False)
 BETA_ALLOWLIST_ENABLED = _env_bool("BETA_ALLOWLIST_ENABLED", False)
+BETA_ALLOWLIST_PHONES = {
+    _normalize_phone_digits(item)
+    for item in os.getenv("BETA_ALLOWLIST_PHONES", "").split(",")
+    if item.strip()
+}
 
 # Budget & Rate Card (update Nigeria/Rest of Africa rates from Meta's rate card before launch)
 MONTHLY_BUDGET_USD = Decimal(os.getenv("MONTHLY_BUDGET_USD", "25.00"))

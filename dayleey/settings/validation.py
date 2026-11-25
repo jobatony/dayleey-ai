@@ -36,9 +36,9 @@ def validate_production_settings(cfg: Any) -> None:
         errors.append("ALLOWED_HOSTS must include at least one non-localhost production domain or IP.")
 
     transport = str(_get(cfg, "WA_TRANSPORT", "cloud_api") or "").strip().lower()
-    if transport == "dry_run":
-        errors.append("WA_TRANSPORT cannot be 'dry_run' in production.")
-    elif transport == "cloud_api":
+    if transport != "cloud_api":
+        errors.append("WA_TRANSPORT must be 'cloud_api' in production.")
+    else:
         app_secret = str(_get(cfg, "WA_APP_SECRET", "") or "").strip()
         verify_token = str(_get(cfg, "WA_VERIFY_TOKEN", "") or "").strip()
         access_token = str(_get(cfg, "WA_ACCESS_TOKEN", "") or "").strip()
@@ -51,10 +51,6 @@ def validate_production_settings(cfg: Any) -> None:
             errors.append("WA_ACCESS_TOKEN must be set in cloud_api mode.")
         if not phone_number_id:
             errors.append("WA_PHONE_NUMBER_ID must be set in cloud_api mode.")
-    elif transport == "baileys":
-        bridge_secret = str(_get(cfg, "BRIDGE_SECRET", "") or "").strip()
-        if not bridge_secret or bridge_secret == "dev-bridge-secret":
-            errors.append("BRIDGE_SECRET must be changed from its dev default in baileys mode.")
 
     if errors:
         raise RuntimeError("Invalid production configuration:\n- " + "\n- ".join(errors))

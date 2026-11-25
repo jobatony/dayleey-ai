@@ -22,6 +22,12 @@ services:
     command: ["/app/scripts/start_worker.sh"]
     env_file:
       - .env.prod
+    healthcheck:
+      test: ["CMD", "python", "manage.py", "check_worker_health"]
+      interval: 60s
+      timeout: 10s
+      start_period: 90s
+      retries: 3
     depends_on:
       web:
         condition: service_healthy
@@ -45,31 +51,6 @@ services:
       - caddy_config:/config
     env_file:
       - .env.prod
-    depends_on:
-      web:
-        condition: service_healthy
-    restart: unless-stopped
-    networks:
-      - dayleey_net
-    logging:
-      driver: json-file
-      options:
-        max-size: "10m"
-        max-file: "3"
-
-  # Optional temporary Baileys WhatsApp sidecar (start with: --profile baileys)
-  bridge:
-    profiles: ["baileys"]
-    build:
-      context: ./bridge
-      dockerfile: Dockerfile
-    env_file:
-      - .env.prod
-    environment:
-      BRIDGE_HOST: "0.0.0.0"
-      DJANGO_INBOUND_URL: "http://web:8000/bridge/inbound/"
-    volumes:
-      - baileys_auth:/app/auth
     depends_on:
       web:
         condition: service_healthy
@@ -113,5 +94,4 @@ networks:
 volumes:
   caddy_data:
   caddy_config:
-  baileys_auth:
   pg_data:

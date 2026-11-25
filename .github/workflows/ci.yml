@@ -39,12 +39,4 @@ jobs:
           WA_VERIFY_TOKEN: ci-real-verify-token
           WA_ACCESS_TOKEN: ci-real-access-token
           WA_PHONE_NUMBER_ID: "1234567890"
-        run: python manage.py check --deploy
-
-      - name: Set up Node 22
-        uses: actions/setup-node@v4
-        with:
-          node-version: "22"
-
-      - name: Check Baileys bridge syntax
-        run: node --check bridge/index.js
+        run: python manage.py check --deploy --fail-level WARNING

@@ -1,7 +1,6 @@
 """Tests for production settings validation, readiness probes, atomic budget counters, and log pruning."""
 from __future__ import annotations
 
-import json
 from datetime import timedelta
 from decimal import Decimal
 from io import StringIO
@@ -30,17 +29,13 @@ def _valid_prod_cfg(**overrides):
         "WA_VERIFY_TOKEN": "real-verify-token-xyz",
         "WA_ACCESS_TOKEN": "real-system-user-token",
         "WA_PHONE_NUMBER_ID": "1234567890",
-        "BRIDGE_SECRET": "dev-bridge-secret",
     }
     cfg.update(overrides)
     return cfg
 
 
-def test_validate_production_settings_accepts_valid_cloud_api_and_baileys():
+def test_validate_production_settings_accepts_valid_cloud_api():
     validate_production_settings(_valid_prod_cfg())
-    validate_production_settings(
-        _valid_prod_cfg(WA_TRANSPORT="baileys", BRIDGE_SECRET="real-bridge-secret-123")
-    )
 
 
 @pytest.mark.parametrize(
@@ -52,11 +47,11 @@ def test_validate_production_settings_accepts_valid_cloud_api_and_baileys():
         ({"WA_DRY_RUN": True}, "WA_DRY_RUN"),
         ({"ALLOWED_HOSTS": ["localhost", "127.0.0.1"]}, "ALLOWED_HOSTS"),
         ({"WA_TRANSPORT": "dry_run"}, "WA_TRANSPORT"),
+        ({"WA_TRANSPORT": "baileys"}, "WA_TRANSPORT"),
         ({"WA_APP_SECRET": "dev-app-secret"}, "WA_APP_SECRET"),
         ({"WA_VERIFY_TOKEN": "dayleey-verify-token"}, "WA_VERIFY_TOKEN"),
         ({"WA_ACCESS_TOKEN": ""}, "WA_ACCESS_TOKEN"),
         ({"WA_PHONE_NUMBER_ID": ""}, "WA_PHONE_NUMBER_ID"),
-        ({"WA_TRANSPORT": "baileys", "BRIDGE_SECRET": "dev-bridge-secret"}, "BRIDGE_SECRET"),
     ],
 )
 def test_validate_production_settings_rejects_unsafe_defaults(overrides, expected_substr):
@@ -83,23 +78,10 @@ def test_healthz_and_readyz_endpoints():
     r = c.get("/readyz/")
     assert r.status_code == 200
     body = r.json()
-    assert body["status"] == "ready"
-    assert body["db"] == "ok"
+    assert body["status"] == "ready" or body["status"] == "healthy"
+    assert body["healthy"] is True
+    assert body["db_ok"] is True
     assert body["scheduler_registered"] is True
-
-
-@pytest.mark.django_db
-def test_bridge_inbound_disabled_in_cloud_api_mode(settings):
-    settings.WA_TRANSPORT = "cloud_api"
-    settings.BRIDGE_SECRET = "real-secret"
-    c = Client()
-    resp = c.post(
-        "/bridge/inbound/",
-        data=json.dumps({"id": "m1", "jid": "123@s.whatsapp.net", "text": "hi"}),
-        content_type="application/json",
-        HTTP_X_BRIDGE_SECRET="real-secret",
-    )
-    assert resp.status_code == 404
 
 
 @pytest.mark.django_db

@@ -1,81 +1,125 @@
-# Live WhatsApp Test Setup (Meta test number + ngrok)
+# Live WhatsApp Cloud API Setup (Meta Test Number + AWS / Local)
 
-Goal: message Dayleey from a real phone while the server runs on your PC. No deployment, business verification or template approval needed.
+Goal: connect Dayleey to Meta's **Official WhatsApp Cloud API** using their free `+1 555...` test phone number and a **non-expiring Permanent System User Token** (no Business Verification required yet, up to 5 verified tester phones).
 
 > [!NOTE]
-> Meta's dashboard changes often, so menu names may differ slightly. Check against https://developers.facebook.com/docs/whatsapp/cloud-api/get-started.
+> Meta's dashboard changes occasionally, so menu names may differ slightly. Reference: https://developers.facebook.com/docs/whatsapp/cloud-api/get-started.
 
-## Part 1 – Meta setup (≈20 min)
-- [ ] Log in at https://developers.facebook.com with a Facebook account (register as a developer if prompted).
-- [ ] **Create App** → use case **Other** / app type **Business** → name it `Dayleey Dev`.
-- [ ] On the app dashboard, **Add product → WhatsApp → Set up**. Accept creating/using a Meta Business portfolio if asked (a test one is fine).
-- [ ] Open **WhatsApp → API Setup**. Note down:
-  - [ ] **Phone number ID** of the test number → `WA_PHONE_NUMBER_ID`
-  - [ ] The **test phone number** itself (digits only, with country code) → `WA_BOT_PHONE_NUMBER`
-  - [ ] **Temporary access token** → `WA_ACCESS_TOKEN` (expires in ~24 h)
-- [ ] Under **Send and receive messages → To**, add your phone (and your partner-tester's phone, up to 5 total). Verify each with the code WhatsApp sends.
-- [ ] From the same page, send the `hello_world` template to your phone. If it arrives, your token and number ID work.
-- [ ] Open **App settings → Basic**, click **Show** next to **App secret** → `WA_APP_SECRET`.
-- [ ] Choose any random string as your verify token → `WA_VERIFY_TOKEN`.
+---
 
-## Part 2 – Local config
-- [ ] Copy the example file: `copy .env.example .env`
-- [ ] Edit `.env`:
-```
-WA_DRY_RUN=False
-WA_PHONE_NUMBER_ID=<from Meta>
-WA_BOT_PHONE_NUMBER=<test number digits>
-WA_ACCESS_TOKEN=<temporary token>
-WA_VERIFY_TOKEN=<your random string>
-WA_APP_SECRET=<from Meta>
-BETA_ALLOWLIST_ENABLED=False
-```
-- [ ] Optional for testing: raise `USER_DAILY_MSG_LIMIT` and `MONTHLY_BUDGET_USD` if you plan many messages.
-- [ ] Apply DB setup: `.venv\Scripts\python manage.py migrate`
+## Part 1 – Meta Setup + Permanent Token (~20 min)
 
-## Part 3 – Tunnel
-- [ ] Install ngrok (https://ngrok.com/download), sign up (free) and run `ngrok config add-authtoken <token>` once.
-- [ ] Start the server in terminal 1:
-```powershell
-.venv\Scripts\python manage.py runserver 8000
-```
-- [ ] Start the tunnel in terminal 2:
-```powershell
-ngrok http 8000
-```
-- [ ] Copy the `https://....ngrok-free.app` URL.
-- [ ] Add that host to `ALLOWED_HOSTS` in `.env` if it isn't covered (`.ngrok-free.app` is in the example already), then restart the server.
-- [ ] Sanity check in a browser: `https://<ngrok-url>/healthz/` shows `{"status":"ok"...}`. If ngrok shows a warning page, accept it.
+1. **Create the Meta App**
+   - [ ] Log in at https://developers.facebook.com and click **Create App**.
+   - [ ] Select **Other** / **Business** (or **Connect with customers through WhatsApp**), name it `Dayleey`.
+   - [ ] Add the **WhatsApp** product and pick/create a Meta Business Portfolio when prompted.
 
-## Part 4 – Connect the webhook
-- [ ] In Meta: **WhatsApp → Configuration → Webhook → Edit**.
-- [ ] **Callback URL:** `https://<ngrok-url>/webhooks/whatsapp/`
-- [ ] **Verify token:** exactly your `WA_VERIFY_TOKEN` → **Verify and save**. (Your server terminal should log a GET request. If it fails, check the token and that the server is running.)
-- [ ] Under **Webhook fields**, **Subscribe** to `messages`.
+2. **Grab Test Number IDs & Add Testers (up to 5 phones)**
+   - [ ] Open **WhatsApp → API Setup**.
+   - [ ] Copy **Phone number ID** → `WA_PHONE_NUMBER_ID`.
+   - [ ] Copy the **Test phone number** (digits only with country code, e.g. `15551234567`) → `WA_BOT_PHONE_NUMBER`.
+   - [ ] Under **To → Manage phone number list**, add your phone and your tester/partner phones (up to 5 total) and confirm each via the WhatsApp OTP.
+   - [ ] Click **Send message** (`hello_world`) to your own phone to confirm delivery works.
 
-## Part 5 – First live test
-In dev settings queue tasks run inline, so you don't need `qcluster` for inbound messages.
-- [ ] From your verified phone, send `hi` to the test number.
-- [ ] Expect the welcome message with **I Agree / Not Now** buttons.
-- [ ] Complete onboarding (consent → name → timezone → quarters → partner).
-- [ ] Send `PLAN`, save a plan, then `TODAY`.
-- [ ] In the admin (`createsuperuser` first) open **Message logs**: outbound rows should be `sent` and later `delivered`/`read` once Meta's status webhooks arrive. **Usage counters** should increase.
-- [ ] **Partner test:** with the second verified phone, tap the invite link (or send the `JOIN-…` text) → Accept → check the user phone gets the notice.
-- [ ] **Scheduled messages:** run `.venv\Scripts\python manage.py run_tick --at "<ISO time>"` to trigger a boundary/wrap-up/partner report now. Both phones must have messaged the bot within the last 24 hours, otherwise the send falls back to a template, which isn't approved on the test number and will fail or be blocked.
+3. **Get the App Secret & Generate a Verify Token**
+   - [ ] Open **App settings → Basic**, click **Show** next to **App secret** → `WA_APP_SECRET`.
+   - [ ] Pick a long random string for webhook verification → `WA_VERIFY_TOKEN` (e.g. `python3 -c "import secrets; print(secrets.token_urlsafe(32))"`).
 
-## Part 6 – Troubleshooting
+4. **Create a Permanent System User Token (never expires every 24h)**
+   - [ ] Open **Meta Business Settings** (`https://business.facebook.com/settings/`) for that same Business Portfolio.
+   - [ ] Go to **Users → System Users → Add**. Name it `dayleey-bot`, role **Admin**.
+   - [ ] Click **Add Assets → Apps** → select your `Dayleey` app → toggle **Full Control / Manage App** → Save.
+   - [ ] Also assign your **WhatsApp Account** under **Add Assets → WhatsApp Accounts** if listed.
+   - [ ] Click **Generate New Token**, choose your `Dayleey` app, select **Never** expire (if prompted), and check:
+     - `whatsapp_business_messaging`
+     - `whatsapp_business_management`
+   - [ ] Copy the token → `WA_ACCESS_TOKEN`.
+
+---
+
+## Part 2A – Connect Directly to Your AWS Server *(Recommended — no ngrok)*
+
+Since your AWS server already has public HTTPS via Caddy:
+
+1. Edit `/opt/dayleey/dayleey-ai/.env.prod`:
+   ```dotenv
+   WA_TRANSPORT=cloud_api
+   WA_DRY_RUN=False
+   WA_TEMPLATES_APPROVED=False
+
+   WA_PHONE_NUMBER_ID=<from API Setup>
+   WA_BOT_PHONE_NUMBER=<test number digits e.g. 15551234567>
+   WA_ACCESS_TOKEN=<permanent system user token>
+   WA_VERIFY_TOKEN=<your random verify token>
+   WA_APP_SECRET=<from App settings -> Basic>
+
+   BETA_ALLOWLIST_ENABLED=True
+   BETA_ALLOWLIST_PHONES=2347025133613,2348147611480
+   ```
+2. Rebuild and start (cleaning up any old Baileys container):
+   ```bash
+   cd /opt/dayleey/dayleey-ai
+   git pull origin production-server
+   docker compose -f docker-compose.prod.yml up -d --build --remove-orphans
+   ```
+   *(If you're using the on-server Postgres database, include `--profile localdb`.)*
+3. In **Meta Developers → WhatsApp → Configuration → Webhook → Edit**:
+   - **Callback URL:** `https://<YOUR_DOMAIN>/webhooks/whatsapp/`
+   - **Verify token:** exact value of `WA_VERIFY_TOKEN`
+   - Click **Verify and save**, then **Subscribe** to the **`messages`** field.
+
+---
+
+## Part 2B – Optional Local PC Testing with ngrok
+
+If testing from Windows without AWS:
+1. Copy `.env.example` to `.env` and set `WA_TRANSPORT=cloud_api`, `WA_DRY_RUN=False`, `WA_TEMPLATES_APPROVED=False`, `DJANGO_Q_SYNC=True`, and your Meta credentials above.
+2. Start Django and ngrok in two terminals:
+   ```powershell
+   .venv\Scripts\python manage.py runserver 8000
+   ngrok http 8000
+   ```
+3. Set Meta's Callback URL to `https://<your-ngrok-url>/webhooks/whatsapp/`, verify with `WA_VERIFY_TOKEN`, and subscribe to `messages`.
+
+---
+
+## Part 3 – Examining Server Health Online
+
+You can check your live AWS server from any phone or browser without SSH:
+
+1. **Visual Status Dashboard (Admin login required):**
+   - Visit `https://<YOUR_DOMAIN>/<ADMIN_URL>status/` (e.g. `https://dayleeyai.abrdns.com/ops-dayleey-7k3m/status/`).
+   - Shows PostgreSQL status, `qcluster` worker heartbeat (`last_tick_age_seconds`), queue depth, failed tasks in 24h, active users/partners, monthly free-tier/budget usage, 24h traffic, and the last 10 `blocked`/`failed` sends.
+2. **Automated Uptime Alerting (`/readyz/`):**
+   - Point a free **UptimeRobot** or **Better Stack** monitor (every 5 minutes) at:
+     `https://<YOUR_DOMAIN>/readyz/`
+   - Returns HTTP `200` when DB, scheduler, and worker heartbeat (<5 min old) are healthy, and HTTP `503` if the worker stalls or the DB drops.
+
+---
+
+## Part 4 – First Live Test & Troubleshooting
+
+- [ ] Message `hi` to the Meta test number from one of your verified phones.
+- [ ] Complete onboarding (`I Agree` → name → timezone → quarters → partner invite link).
+- [ ] Run `PLAN` and `TODAY`, then confirm outbound messages show `sent` → `delivered` / `read` in the Status Dashboard or Django Admin **Message logs**.
+- [ ] **Partner test:** forward the `wa.me` invite link to your second verified phone → tap `Accept`.
+- [ ] **Keeping the 24h window open on the test number:** Because `WA_TEMPLATES_APPROVED=False` until custom templates are approved, any scheduled send when a person hasn't tapped anything in >24 hours is safely logged as `blocked (templates_unapproved_window_closed)` instead of hitting Meta error `132001`. Remind testers/partners to tap a button (`All Done`, `👏 Great job`, etc.) daily to keep their 24h window open.
+
 | Symptom | Likely cause |
 |---|---|
-| Webhook verification fails | Token mismatch, server or ngrok not running, wrong path (needs trailing `/webhooks/whatsapp/`) |
-| 403 in server log on POST | Wrong `WA_APP_SECRET` (signature check) |
-| No reply to `hi` | Webhook not subscribed to `messages`, sender not on the verified recipient list, or `WA_DRY_RUN` still `True` |
-| Outbound `failed`, code 190/401 | Token expired (24 h), generate a new one and restart |
-| Outbound `failed`, code 131030 | Recipient not on the allowed list |
-| Outbound `failed` for templates (132001) | Template not approved or doesn't exist on this account |
-| Messages `blocked` in admin | Read `error_code`: `window_closed`, `quiet_hours`, `daily_rate_limit`, `global_budget_exceeded` |
-| ngrok URL changed | Free URLs change on restart; update the callback URL in Meta |
+| Webhook verification fails | `WA_VERIFY_TOKEN` mismatch, missing trailing `/` in `/webhooks/whatsapp/`, or server/HTTPS down |
+| `403` on webhook POST | Wrong `WA_APP_SECRET` (HMAC signature check failed) |
+| Bot replies *"closed beta"* | Sender not listed in `BETA_ALLOWLIST_PHONES` (or `is_allowlisted` unchecked in Admin) |
+| No reply at all | Webhook not subscribed to `messages`, sender not verified in Meta *API Setup*, or `WA_DRY_RUN=True` |
+| Outbound `failed` code `190` / `401` | Token invalid/expired — use a Permanent System User Token |
+| Outbound `failed` code `131030` | Recipient number not verified in Meta's test-number recipient list |
+| Outbound `blocked`: `templates_unapproved_window_closed` | Person's 24h window closed while `WA_TEMPLATES_APPROVED=False`; have them send `hi` or tap a button |
 
-## Part 7 – When done
-- [ ] Set `WA_DRY_RUN=True` again for local simulation.
-- [ ] Keep notes on any differences between Meta's real payloads and the test fixtures; fix the parsing in `apps/engine/router.py` or `apps/messaging/status.py` if needed.
-- [ ] Next for launch: business verification, real number, System User permanent token, template submission, Privacy Policy, Nigeria rate card.
+---
+
+## Part 5 – Cutting Over to Your Real Phone Number Later
+
+1. Submit the 4 Utility templates (`partner_daily_report`, `quarter_boundary_reminder`, `user_daily_wrapup`, `weekly_report`) from `apps/messaging/templates.py` in Meta Manager.
+2. Delete the WhatsApp account on your dedicated SIM (`09022603655`) if registered in the mobile app, register it to your WABA in Meta Business Manager (via SMS OTP), and add a payment method + update `RATE_CARD_JSON`.
+3. Update `.env.prod` with the new `WA_PHONE_NUMBER_ID`, `WA_BOT_PHONE_NUMBER`, and `WA_TEMPLATES_APPROVED=True` (and turn off `BETA_ALLOWLIST_ENABLED=False` when ready for open users).
+4. Recreate `web` and `worker`: `docker compose -f docker-compose.prod.yml up -d`.

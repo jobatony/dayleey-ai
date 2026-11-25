@@ -1,4 +1,5 @@
 .venv/
+.vscode/
 __pycache__/
 *.py[cod]
 *.sqlite3
@@ -12,7 +13,5 @@ __pycache__/
 staticfiles/
 .coverage
 htmlcov/
-bridge/node_modules/
-bridge/auth/
 *.pem
 *.key

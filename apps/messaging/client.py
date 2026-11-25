@@ -1,4 +1,4 @@
-"""WhatsApp Cloud API & Baileys sidecar client with budget gating, 24h window awareness, retries, and dry-run support."""
+"""WhatsApp Cloud API client with budget gating, 24h window awareness, retries, and dry-run support."""
 from __future__ import annotations
 
 import logging
@@ -14,7 +14,7 @@ from django.utils import timezone
 from apps.accounts.models import Person
 from apps.messaging.budget import BlockedSendError, check_can_send, record_delivery, record_sent
 from apps.messaging.models import MessageLog
-from apps.messaging.templates import TEMPLATE_SPECS, build_template_payload
+from apps.messaging.templates import build_template_payload
 
 logger = logging.getLogger(__name__)
 
@@ -34,46 +34,6 @@ def peek_dry_run_outbox() -> list[dict]:
 
 def clear_dry_run_outbox() -> None:
     _DRY_RUN_OUTBOX.clear()
-
-
-def render_numbered_menu(
-    *,
-    kind: str,
-    body: str,
-    buttons: list[tuple[str, str]] | None = None,
-    list_rows: list[tuple[str, str, str]] | None = None,
-    template_name: str = "",
-    template_params: list[str] | None = None,
-) -> tuple[str, list[dict[str, str]]]:
-    """Render any interactive/template message into plain text + menu metadata for Baileys."""
-    text = body.strip()
-    menu: list[dict[str, str]] = []
-
-    if kind == "template" and not text:
-        spec = TEMPLATE_SPECS.get(template_name)
-        if spec:
-            rendered = spec["body"]
-            for idx, val in enumerate(template_params or [], start=1):
-                rendered = rendered.replace(f"{{{{{idx}}}}}", str(val))
-            text = rendered
-        else:
-            text = " ".join(str(p) for p in (template_params or []))
-
-    if buttons:
-        lines = [text, "", "Reply with a number:"]
-        for idx, (bid, label) in enumerate(buttons, start=1):
-            lines.append(f"{idx}. {label}")
-            menu.append({"id": bid, "label": label})
-        text = "\n".join(lines).strip()
-    elif list_rows:
-        lines = [text, "", "Reply with a number:"]
-        for idx, (rid, title, desc) in enumerate(list_rows, start=1):
-            suffix = f" — {desc}" if desc else ""
-            lines.append(f"{idx}. {title}{suffix}")
-            menu.append({"id": rid, "label": title})
-        text = "\n".join(lines).strip()
-
-    return text, menu
 
 
 class WhatsAppClient:
@@ -121,8 +81,8 @@ class WhatsAppClient:
         effective_template = template_name
         effective_params = template_params or []
 
-        # Baileys is not bound by Meta's 24h Cloud API template window
-        if self.transport != "baileys" and effective_kind != "template" and not person.is_window_open(ref):
+        # Enforce 24h customer-service window for non-template messages
+        if effective_kind != "template" and not person.is_window_open(ref):
             if fallback_template:
                 effective_kind = "template"
                 effective_template, effective_params = fallback_template
@@ -135,6 +95,20 @@ class WhatsAppClient:
                     reason="window_closed",
                     detail="24h customer-service window is closed and no fallback template was provided.",
                 )
+
+        if (
+            effective_kind == "template"
+            and not self.dry_run
+            and not getattr(settings, "WA_TEMPLATES_APPROVED", False)
+        ):
+            return self._log_blocked(
+                person=person,
+                msg_type=MessageLog.MsgType.TEMPLATE,
+                template_name=effective_template,
+                payload={"body": body, "template_params": effective_params},
+                reason="templates_unapproved_window_closed",
+                detail="24h window is closed and WA_TEMPLATES_APPROVED is False.",
+            )
 
         is_template = effective_kind == "template"
         try:
@@ -155,18 +129,6 @@ class WhatsAppClient:
                 payload={"body": body, "buttons": buttons, "template_params": effective_params},
                 reason=exc.reason,
                 detail=str(exc),
-            )
-
-        if self.transport == "baileys":
-            return self._send_via_baileys(
-                person=person,
-                kind=effective_kind,
-                body=body,
-                buttons=buttons,
-                list_rows=list_rows,
-                template_name=effective_template,
-                template_params=effective_params,
-                now=ref,
             )
 
         wa_payload = self._build_wa_payload(
@@ -244,90 +206,6 @@ class WhatsAppClient:
         return self.send(
             person, "template", template_name=template_name, template_params=params, **kwargs
         )
-
-    def _send_via_baileys(
-        self,
-        *,
-        person: Person,
-        kind: str,
-        body: str,
-        buttons: list[tuple[str, str]] | None,
-        list_rows: list[tuple[str, str, str]] | None,
-        template_name: str,
-        template_params: list[str],
-        now: datetime,
-    ) -> MessageLog:
-        # Dual-layer allowlist check on Django side
-        allowlist: set[str] = getattr(settings, "BAILEYS_ALLOWLIST", set())
-        digits = person.phone.lstrip("+")
-        if allowlist and digits not in allowlist and person.wa_jid not in allowlist:
-            return self._log_blocked(
-                person=person,
-                msg_type=MessageLog.MsgType.TEXT,
-                template_name=template_name,
-                payload={"body": body},
-                reason="not_allowlisted",
-                detail=f"{person.phone} is not in BAILEYS_ALLOWLIST.",
-            )
-
-        rendered_text, menu = render_numbered_menu(
-            kind=kind,
-            body=body,
-            buttons=buttons,
-            list_rows=list_rows,
-            template_name=template_name,
-            template_params=template_params,
-        )
-
-        # Save numbered menu options in Person.state_data so numeric replies resolve cleanly.
-        # Do NOT clear _last_menu on plain-text notifications/nudges so active menus remain usable.
-        if menu:
-            state_data = dict(person.state_data or {})
-            state_data["_last_menu"] = menu
-            person.state_data = state_data
-            person.save(update_fields=["state_data", "updated_at"])
-
-        target_jid = person.wa_jid or f"{digits}@s.whatsapp.net"
-        bridge_payload = {"jid": target_jid, "phone": digits, "text": rendered_text}
-
-        log = MessageLog.objects.create(
-            person=person,
-            phone=person.phone,
-            direction=MessageLog.Direction.OUTBOUND,
-            msg_type=MessageLog.MsgType.TEXT,
-            template_name=template_name,
-            payload=bridge_payload,
-            status=MessageLog.Status.QUEUED,
-            billable=False,
-        )
-
-        url = f"{settings.BRIDGE_URL}/send"
-        headers = {
-            "X-Bridge-Secret": settings.BRIDGE_SECRET,
-            "Content-Type": "application/json",
-        }
-        try:
-            with httpx.Client(timeout=10.0) as client:
-                resp = client.post(url, json=bridge_payload, headers=headers)
-            if 200 <= resp.status_code < 300:
-                log.wa_message_id = f"baileys_{uuid.uuid4().hex[:16]}"
-                log.status = MessageLog.Status.SENT
-                log.save(update_fields=["wa_message_id", "status", "updated_at"])
-                record_sent(person, now=now)
-                return log
-            log.status = MessageLog.Status.FAILED
-            log.error_code = str(resp.status_code)
-            log.error_message = resp.text[:500]
-            log.save(update_fields=["status", "error_code", "error_message", "updated_at"])
-            logger.error("Baileys bridge send failed (%s): %s", resp.status_code, resp.text[:200])
-            return log
-        except httpx.HTTPError as exc:
-            log.status = MessageLog.Status.FAILED
-            log.error_code = "BRIDGE_NETWORK"
-            log.error_message = str(exc)[:500]
-            log.save(update_fields=["status", "error_code", "error_message", "updated_at"])
-            logger.error("Baileys bridge network error: %s", exc)
-            return log
 
     def _build_wa_payload(
         self,
